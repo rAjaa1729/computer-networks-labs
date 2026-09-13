@@ -1,18 +1,28 @@
+"""AIMD + TCP-style RTT estimation (EstimatedRTT / DevRTT timeout).
+
+Same reliable-transfer protocol as ``udp_client_aimd.py``, but the socket
+timeout adapts per round (``timeout = estimated + 4 * dev``, alpha=0.125,
+beta=0.25) instead of staying fixed.
+"""
+
+import os
 import socket
 import hashlib
 import time
-from _thread import *
-# Server details
-server_host = "10.17.7.218"
-# server_host = "127.0.0.1"
-server_port = 9802
-start=time.time()
+
+# Server details (override with environment variables for local testing).
+server_host = os.getenv("UDP_SERVER_HOST", "10.17.7.134")
+# server_host="127.0.0.1"
+server_port = int(os.getenv("UDP_SERVER_PORT", "9801"))
+
 
 # Create a UDP socket
 udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-# Define the TimeOut for receiving a response (in seconds)
-timeout = 0.01
+# Define the timeout for receiving a response (in seconds)
+timeout = 0.02
+alpha=0.125
+beta=0.25
 
 def send_and_receive(request, expected_response_prefix):
 
@@ -44,65 +54,94 @@ print("Total size to be received : ",num_bytes)
 data_buffer = [None] * (num_bytes // 1448 + 1)
 
 All_offset=[]
-offset=[]
 
 # Define the maximum number of bytes per request
 max_bytes_per_request = 1448
 
-check=True
 
-squished_no=0
-# sleep time for sendrequest is 0.007 fine
-def SendRequest(threadno):
-    global check
-    global All_offset
-    print("Thread No hi bye noentry : ",threadno)
-    c=0
-    while(len(All_offset)!=0):
-        time.sleep(0.008)
+def SendRequest(cwnd,mi_factor,ExpectedRTT,DevRTT,TimeOut):
+
+    # print(ExpectedRTT)
+
+    print("------------------------------",TimeOut,"-----------------------")
+
+    # print(ExpectedRTT,"   ",DevRTT)
+    # timeout2=ExpectedRTT
+    start=time.time()
+    requested_offset=set([])
+    n=len(All_offset)
+    count=min(int(cwnd),n)
+
+    for i in range(count):
+
         num_to_receive=min(max_bytes_per_request,num_bytes-(All_offset[-1]))
         offset_request = f"Offset: {All_offset[-1]}\nNumBytes: {num_to_receive}\n\n"
         udp_socket.sendto(offset_request.encode(), (server_host, server_port))
-        All_offset.pop()
-        c+=1
-    check=False
 
-def ReceiveRequest():
-    global offset
-    global squished_no
-    while(len(offset)!=0):
+        requested_offset.add(All_offset[-1])
+
+        All_offset.pop()
+
+    udp_socket.settimeout(TimeOut)
+    responses=[]
+
+    
+    while True:
+        # time.sleep(0.005)
+        if(count==0):
+            cwnd=cwnd+(1/cwnd)
+            break
         try:
             response, _ = udp_socket.recvfrom(4096)
             response = response.decode()
 
             if response.startswith("Offset: "):
-                received_offset = int(response.split("\n")[0].split(": ")[1])
-                received_num_bytes = int(response.split("\nNumBytes: ")[1].split("\n")[0])
-                received_data = response.split("\n\n", 1)[1].encode()
-
-                print("received_offset : ",received_offset)
-                
-                if(data_buffer[received_offset // 1448]==None):
-                    offset.remove(received_offset)
-                    data_buffer[received_offset // 1448] = (received_offset, received_num_bytes, received_data)
-            if "Squished" in response:
-                squished_no+=1
+                count-=1
+                responses.append(response)
+                end=time.time()
+                SampleRTT=(end-start)
+                start=end
+                ExpectedRTT=(1-alpha)*ExpectedRTT+alpha*(SampleRTT)
+                DevRTT=(1-beta)*DevRTT+beta*abs(ExpectedRTT-SampleRTT)
+                TimeOut=ExpectedRTT+4*DevRTT
+            
         except socket.timeout:
-            print(f"Timeout: No response received for request. Retrying...")
+            # print("Timeout: No response received within the timeout period.")
+            cwnd=cwnd*mi_factor
+            break
+
+    for offset_response in responses:
+
+        received_offset = int(offset_response.split("\n")[0].split(": ")[1])
+        received_num_bytes = int(offset_response.split("\nNumBytes: ")[1].split("\n")[0])
+        received_data = offset_response.split("\n\n", 1)[1].encode()
+
+        requested_offset.discard(received_offset)
+        data_buffer[received_offset // 1448] = (received_offset, received_num_bytes, received_data)
+
+    for off in requested_offset:
+        All_offset.append(off)
+
+    return [cwnd,ExpectedRTT,DevRTT,TimeOut]
+
 
 def RunAIMD():
-    global All_offset
-    global check
-    for i in range(0, num_bytes, max_bytes_per_request):
-        All_offset.append(i)
-        offset.append(i)
-    start_new_thread(ReceiveRequest,())
-    threadno=1
-    while len(All_offset)!=0:
-        check=True
-        SendRequest(threadno)
-        All_offset=offset[:]
+    # Request and receive data in chunks
+    cwnd=1.0
+    mi_factor=0.5
+    ExpectedRTT=0.05
+    DevRTT=0
+    TimeOut=0.05
     
+    for offset in range(0, num_bytes, max_bytes_per_request):
+        All_offset.append(offset,)
+
+    while len(All_offset):
+        response=SendRequest(cwnd,mi_factor,ExpectedRTT,DevRTT,TimeOut)
+        cwnd=max(1.0,response[0])
+        ExpectedRTT=response[1]
+        DevRTT=response[2]
+        TimeOut=response[3]
 
 
 def CheckResult():
@@ -110,9 +149,6 @@ def CheckResult():
     assembled_data = bytearray(num_bytes)
 
     for data in data_buffer:
-        if(data is None):
-            print("Data is None")
-            continue
         assembled_data[data[0]:data[0]+data[1]] = data[2]
 
     # Calculate MD5 hash of the received data
@@ -142,7 +178,9 @@ def CheckResult():
     udp_socket.close()
 
 
+
+
 RunAIMD()
 CheckResult()
 
-print("NO of time squished : ",squished_no)
+

@@ -1,0 +1,20 @@
+# OS / editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~
+
+# Competitive-programming helper cache
+.cph/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.log
+
+# Java build output (keep the two provided test-server binaries, ignore the rest)
+*.class
+!lab-03-reliable-udp-transfer/tools/*.class

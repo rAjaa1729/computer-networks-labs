@@ -1,18 +1,25 @@
+"""Threaded flood client: one sender thread paces ``Offset`` requests
+(``sleep``-throttled to avoid ``Squished`` replies) while the receiver
+drains responses and re-queues lost offsets until the buffer is full.
+Highest throughput of the set; no congestion window — pacing only.
+"""
+
+import os
 import socket
 import hashlib
 import time
-
-# Server details
-server_host = "10.17.7.218"
-server_host="127.0.0.1"
-server_port = 9801
-start=time.time()
+from _thread import *
+# Server details (override with environment variables for local testing).
+server_host = os.getenv("UDP_SERVER_HOST", "10.17.7.218")
+# server_host = "127.0.0.1"
+server_port = int(os.getenv("UDP_SERVER_PORT", "9802"))
+start = time.time()
 
 # Create a UDP socket
 udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-# Define the timeout for receiving a response (in seconds)
-timeout = 0.1
+# Define the TimeOut for receiving a response (in seconds)
+timeout = 0.01
 
 def send_and_receive(request, expected_response_prefix):
 
@@ -43,85 +50,66 @@ print("Total size to be received : ",num_bytes)
 # Create a buffer to store received data
 data_buffer = [None] * (num_bytes // 1448 + 1)
 
+All_offset=[]
+offset=[]
+
 # Define the maximum number of bytes per request
 max_bytes_per_request = 1448
 
+check=True
 
-def SendRequest(offset,cwnd,ai_factor,mi_factor):
-
-    print(offset,"--------------------------------------------",cwnd)
-    count=0
-    for i in range(cwnd):
-        num_to_receive=min(max_bytes_per_request,num_bytes-(offset+i*max_bytes_per_request))
-        if(num_to_receive==0):
-            break
-
-        count+=1
-        offset_request = f"Offset: {offset+i*max_bytes_per_request}\nNumBytes: {num_to_receive}\n\n"
+squished_no=0
+# sleep time for sendrequest is 0.007 fine
+def SendRequest(threadno):
+    global check
+    global All_offset
+    print("Thread No hi bye noentry : ",threadno)
+    c=0
+    while(len(All_offset)!=0):
+        time.sleep(0.008)
+        num_to_receive=min(max_bytes_per_request,num_bytes-(All_offset[-1]))
+        offset_request = f"Offset: {All_offset[-1]}\nNumBytes: {num_to_receive}\n\n"
         udp_socket.sendto(offset_request.encode(), (server_host, server_port))
+        All_offset.pop()
+        c+=1
+    check=False
 
-    udp_socket.settimeout(timeout)
-    responses=[]
-
-    while True:
-        if(count==0):
-            cwnd+=1
-            break
+def ReceiveRequest():
+    global offset
+    global squished_no
+    while(len(offset)!=0):
         try:
             response, _ = udp_socket.recvfrom(4096)
             response = response.decode()
 
             if response.startswith("Offset: "):
-                count-=1
-                responses.append(response)
+                received_offset = int(response.split("\n")[0].split(": ")[1])
+                received_num_bytes = int(response.split("\nNumBytes: ")[1].split("\n")[0])
+                received_data = response.split("\n\n", 1)[1].encode()
 
+                print("received_offset : ",received_offset)
+                
+                if(data_buffer[received_offset // 1448]==None):
+                    offset.remove(received_offset)
+                    data_buffer[received_offset // 1448] = (received_offset, received_num_bytes, received_data)
+            if "Squished" in response:
+                squished_no+=1
         except socket.timeout:
-            print("Timeout: No response received within the timeout period.")
-            cwnd=int(cwnd*mi_factor)
-            break
-
-    
-    my_offset=[]
-    for offset_response in responses:
-
-        received_offset = int(offset_response.split("\n")[0].split(": ")[1])
-        received_num_bytes = int(offset_response.split("\nNumBytes: ")[1].split("\n")[0])
-        received_data = offset_response.split("\n\n", 1)[1].encode()
-
-        my_offset.append(received_offset)
-        data_buffer[received_offset // 1448] = (received_offset, received_num_bytes, received_data)
-
-    my_offset.sort(reverse=True)
-
-
-    while len(my_offset)!=0:
-        num_to_receive=min(max_bytes_per_request,num_bytes-offset)
-
-        if(num_to_receive==0):
-            break
-
-        if(offset==my_offset[-1]):
-            offset=my_offset[-1]+num_to_receive
-            my_offset.pop()
-        else:
-            break
-
-    return [offset,cwnd]
-
+            print(f"Timeout: No response received for request. Retrying...")
 
 def RunAIMD():
-    # Request and receive data in chunks
-    mincwnd=1
-    cwnd=1
-    ai_factor=1
-    mi_factor=0.5
-    offset=0
-    while offset<num_bytes:
-        response=SendRequest(offset,cwnd,ai_factor,mi_factor)
-        # print("init ",offset," final ",response[0]," initcwnd ",cwnd," finalcwnd ",response[1])
-        offset=response[0]
-        cwnd=max(mincwnd,response[1])
-
+    global All_offset
+    global check
+    for i in range(0, num_bytes, max_bytes_per_request):
+        All_offset.append(i)
+        offset.append(i)
+    start_new_thread(ReceiveRequest,())
+    threadno=1
+    while len(All_offset)!=0:
+        check=True
+        SendRequest(threadno)
+        All_offset=offset[:]
+    
 
 
 def CheckResult():
@@ -164,4 +152,4 @@ def CheckResult():
 RunAIMD()
 CheckResult()
 
-
+print("NO of time squished : ",squished_no)

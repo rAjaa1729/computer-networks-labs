@@ -1,12 +1,25 @@
+"""Reliable file transfer over UDP with AIMD congestion control.
+
+Protocol (course server): ``SendSize`` -> ``Size: N``; then batched
+``Offset: <o> / NumBytes: <n>`` requests for 1448-byte chunks;
+retransmit lost offsets; finally ``Submit: <id> / MD5: <hash>`` and parse
+``Result / Time / Penalty``. Congestion window: +1 per clean round (AI),
+halve on timeout (MD); timed-out offsets are re-queued.
+
+Run: ``python3 udp_client_aimd.py`` (needs the course UDP server or the
+local test server in ``tools/`` — see the lab README).
+"""
+
+import os
 import socket
 import hashlib
 import time
 
-# Server details
-server_host = "10.17.7.134"
+# Server details (override with environment variables for local testing).
+server_host = os.getenv("UDP_SERVER_HOST", "10.17.7.134")
 # server_host="127.0.0.1"
-server_port = 9801
-start=time.time()
+server_port = int(os.getenv("UDP_SERVER_PORT", "9801"))
+start = time.time()
 
 # Create a UDP socket
 udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -76,8 +89,8 @@ def SendRequest(cwnd,ai_factor,mi_factor):
             response, _ = udp_socket.recvfrom(4096)
             response = response.decode()
 
-            if"Sqished" in response:
-                print("Sqished")
+            if "Squished" in response:
+                print("Squished (server-side rate-limit signal)")
 
             if response.startswith("Offset: "):
                 count-=1

@@ -1,3 +1,12 @@
+"""AIMD client with EMA RTT estimation and CSV logging.
+
+Same protocol as ``udp_client_aimd.py`` plus per-packet RTT tracking and two
+trace files: ``logs/data_log.csv`` (burst size over time) and
+``logs/offset_log.csv`` (per-request/per-reply offsets). Sample logs from a
+real run are checked in under ``logs/``.
+"""
+
+import os
 from socket import *
 import hashlib
 import time
@@ -7,9 +16,9 @@ import csv
 # sequence_numbers = []
 data_log = []
 offset_log = []
-begin= time.time()
-serverName = '127.0.0.1'
-serverPort = 9802
+begin = time.time()
+serverName = os.getenv("UDP_SERVER_HOST", "127.0.0.1")
+serverPort = int(os.getenv("UDP_SERVER_PORT", "9802"))
 clientSocket = socket(AF_INET, SOCK_DGRAM)
 numByt = 1448
 request1 = 'SendSize\n\Reset\n\n'

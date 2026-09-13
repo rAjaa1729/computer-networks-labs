@@ -1,12 +1,18 @@
+"""Baseline stop-and-wait client: one ``Offset`` request at a time, retry on
+timeout, reassemble in order, then ``Submit`` the MD5. Slow but simple and
+correct; kept as the reference implementation before the AIMD variants.
+"""
+
+import os
 import socket
 import hashlib
 import time
 
-# Server details
-server_host = "10.17.7.218"
+# Server details (override with environment variables for local testing).
+server_host = os.getenv("UDP_SERVER_HOST", "10.17.7.218")
 # server_host="127.0.0.1"
-server_port = 9802
-start=time.time()
+server_port = int(os.getenv("UDP_SERVER_PORT", "9802"))
+start = time.time()
 
 # Create a UDP socket
 udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

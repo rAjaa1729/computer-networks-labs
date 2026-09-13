@@ -1,14 +1,35 @@
+"""Distributed TCP download — team coordinator.
+
+One coordinator fetches lines itself (``HandleSir``) while accepting worker
+clients (``client_thread``). Workers send newly fetched ``SENDLINE`` results;
+the coordinator dedups them into ``All_lines``. Once all 1000 lines are
+collected it serves stragglers (``Send_To_Clients``) and ``SUBMIT``s the set.
+
+Run: ``python3 coordinator.py`` on a machine reachable by the workers
+(see ``COORDINATOR_HOST``/``COORDINATOR_PORT``), then start ``client.py``.
+"""
+
+import os
 import socket
-from _thread import *
 import time
+from _thread import *
 
-myserver_socket=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-myserver_host="10.184.21.237"
-myserver_port=1235
+import os
 
-sirserver_socket=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-sirserver_host="10.17.7.218"
-sirserver_port=9803
+# --- Configuration (override with environment variables) -------------------
+MY_HOST = os.getenv("COORDINATOR_HOST", "10.184.21.237")
+MY_PORT = int(os.getenv("COORDINATOR_PORT", "1235"))
+UPSTREAM_HOST = os.getenv("UPSTREAM_HOST", "10.17.7.218")
+UPSTREAM_PORT = int(os.getenv("UPSTREAM_PORT", "9803"))
+NUM_LINES = 1000
+
+myserver_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+myserver_host = MY_HOST
+myserver_port = MY_PORT
+
+sirserver_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sirserver_host = UPSTREAM_HOST
+sirserver_port = UPSTREAM_PORT
 
 myserver_socket.bind((myserver_host,myserver_port))
 myserver_socket.listen(5)
@@ -26,9 +47,9 @@ check=[0]*nclients
 
 def submit():
     print("Submission Started....")
-    submit="SUBMIT\n"
-    info ="cs1210915@bauxite\n"
-    count ="1000\n"
+    submit = "SUBMIT\n"
+    info = "cs1210915@bauxite\n"  # team id used for the original course submission
+    count = "1000\n"
     sirserver_socket.sendall(submit.encode())
     sirserver_socket.sendall(info.encode())
     sirserver_socket.sendall(count.encode())
@@ -146,7 +167,7 @@ try:
         print("hi")
         client_socket,addr=myserver_socket.accept()
         Clients_list.append([client_socket,addr])
-        print("Conncted to "+" IP "+addr[0]+" Port : "+str(addr[1]))
+        print("Connected to " + " IP " + addr[0] + " Port : " + str(addr[1]))
         ThreadCount+=1
         start_new_thread(client_thread,(client_socket,ThreadCount,))
         print("Total Thread Count ",ThreadCount)

@@ -1,14 +1,34 @@
+"""Distributed TCP download — worker client.
+
+Protocol (against the course server ``vayu``):
+``SENDLINE`` -> ``<line_no>\\n<content>\\n``; dedup locally, forward new lines
+to the team coordinator; when the coordinator signals completion (``"0"``),
+pull any missing lines from it, then ``SUBMIT`` the full 1000-line set.
+
+Run: ``python3 client.py`` (needs the coordinator in ``coordinator.py`` and,
+originally, access to the IIT-Delhi course server).
+"""
+
+import os
 import socket
 import sys
 import time
 
-# Server information
-server_ip = "10.17.7.218"
-server_port = 9801
+# --- Configuration (override with environment variables) -------------------
+# Course upstream server (unreachable outside IIT Delhi; kept for reference).
+UPSTREAM_HOST = os.getenv("UPSTREAM_HOST", "10.17.7.218")
+UPSTREAM_PORT = int(os.getenv("UPSTREAM_PORT", "9801"))
+# Team coordinator (see coordinator.py). Run it first, then point this at it.
+COORDINATOR_HOST = os.getenv("COORDINATOR_HOST", "10.184.5.250")
+COORDINATOR_PORT = int(os.getenv("COORDINATOR_PORT", "1235"))
 
-hathi_ip= "10.184.5.250"
-# hathi_ip="10.194.28.208"
-hathi_port =1235
+NUM_LINES = 1000
+
+# Back-compat aliases for the original variable names used below.
+server_ip = UPSTREAM_HOST
+server_port = UPSTREAM_PORT
+hathi_ip = COORDINATOR_HOST
+hathi_port = COORDINATOR_PORT
 
 stor  = [0]*1000
 
@@ -115,28 +135,6 @@ def send_sendline_request(client_socket,hathi_socket):
         return None, None
 
 if __name__ == "__main__":
-    client_socket,hathi_socket = connect_to_server()
-    send_sendline_request( client_socket , hathi_socket )
+    client_socket, hathi_socket = connect_to_server()
+    send_sendline_request(client_socket, hathi_socket)
     client_socket.close()
-    # have = ["-23"]*1000
-    # ct=1000
-    # for i in range (0,1000):
-    #     print(i , have[i])
-    # while ct>0:
-    #     # command=input()
-    #     line = send_sendline_request(client_socket).split('\n',1)
-    #     print(line)
-    #     x=int(line[0])
-    #     if have[x]=="-23" : 
-    #         print(x)
-    #         have[x]=line[1]
-    #         ct-=1
-    # print(have)
-    # for i in range (0,1000):
-    #     print(i , have[i][:5])
-    # submit="SUBMIT\n"
-    # info="cs1210917@bauxite"
-    # client_socket.sendall(submit.encode())
-    # client_socket.sendall(info.encode())
-    # for i in range (0,1000):
-    #     client_socket.sendall()
